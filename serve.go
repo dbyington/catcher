@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
+	"net/http/httptest"
 
 	"github.com/dbyington/pitcher"
 	"github.com/sirupsen/logrus"
@@ -13,6 +15,27 @@ var W1 = func(next http.Handler) http.Handler {
 		log.Debug("My Middleware Calling next")
 		next.ServeHTTP(w, r)
 		log.Debug("My Middleware Done")
+	})
+}
+
+var responseModifier = func(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := r.Context().Value("log").(*logrus.Logger)
+		res := httptest.NewRecorder()
+		log.Debugln("response modifier")
+		next.ServeHTTP(res, r)
+		log.Debugf("modifier got response code %d", res.Code)
+		if r.RequestURI == "/home" {
+			log.Debugln("request for home, returning 404, empty")
+			//res.WriteHeader(http.StatusNotFound)
+			res.Code=http.StatusNotFound
+			b := bytes.NewBuffer(nil)
+			res.Body = b
+		}
+		w.WriteHeader(res.Code)
+		if _, err := w.Write(res.Body.Bytes()); err != nil {
+			log.Errorf("modifier writing body: %s", err)
+		}
 	})
 }
 
@@ -55,6 +78,7 @@ func main() {
 	app := pitcher.NewApp(":8888")
 
 	app.Use(W1)
+	app.Use(responseModifier)
 
 	app.GET("/", home)
 	app.GET("/home", home)
